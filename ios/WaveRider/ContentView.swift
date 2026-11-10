@@ -188,38 +188,8 @@ struct SteerPanel: View {
             Text("STEERING").font(.caption2).tracking(1).foregroundColor(.wrDim)
             Text(steerText).font(.title2.bold().monospacedDigit())
             Spacer(minLength: 0)
-            GeometryReader { geo in
-                let w = geo.size.width
-                let knobR: CGFloat = 31
-                let x = w / 2 + CGFloat(ble.steer) / 255 * (w / 2 - knobR)
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 16).fill(Color.wrPanel2)
-                    Rectangle().fill(Color.wrLine)
-                        .frame(width: 2)
-                        .padding(.vertical, 10)
-                        .offset(x: w / 2 - 1)
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.wrBlue.opacity(0.7))
-                        .frame(width: abs(x - w / 2), height: 9)
-                        .offset(x: min(x, w / 2))
-                    Circle()
-                        .fill(RadialGradient(colors: [.white, Color(red: 0.79, green: 0.84, blue: 0.89)],
-                                             center: UnitPoint(x: 0.35, y: 0.3), startRadius: 2, endRadius: 40))
-                        .frame(width: knobR * 2, height: knobR * 2)
-                        .shadow(color: .black.opacity(0.55), radius: 7, y: 4)
-                        .offset(x: x - knobR)
-                }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { g in
-                            let v = Int(((g.location.x - w / 2) / (w / 2 - knobR) * 255).rounded())
-                            ble.steer = max(-255, min(255, v))
-                        }
-                        .onEnded { _ in ble.steer = 0 }
-                )
-            }
-            .frame(height: 110)
+            SteerTrack()
+                .frame(height: 110)
             Spacer(minLength: 0)
             HStack {
                 Text("◀ Left")
@@ -232,6 +202,68 @@ struct SteerPanel: View {
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color.wrPanel))
+    }
+}
+
+// MARK: - Steering track (split out so the type-checker can cope)
+
+struct SteerTrack: View {
+    @EnvironmentObject var ble: BoatBLE
+    private let knobR: CGFloat = 31
+
+    private func knobX(_ w: CGFloat) -> CGFloat {
+        let half: CGFloat = w / 2
+        let range: CGFloat = half - knobR
+        let frac: CGFloat = CGFloat(ble.steer) / 255.0
+        return half + frac * range
+    }
+
+    private func steerValue(at locationX: CGFloat, width w: CGFloat) -> Int {
+        let half: CGFloat = w / 2
+        let range: CGFloat = half - knobR
+        let raw: CGFloat = (locationX - half) / range * 255.0
+        let v: Int = Int(raw.rounded())
+        return max(-255, min(255, v))
+    }
+
+    private var knobFill: RadialGradient {
+        let light = Color(red: 0.79, green: 0.84, blue: 0.89)
+        return RadialGradient(colors: [Color.white, light],
+                              center: UnitPoint(x: 0.35, y: 0.3),
+                              startRadius: 2, endRadius: 40)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let w: CGFloat = geo.size.width
+            let half: CGFloat = w / 2
+            let x: CGFloat = knobX(w)
+            let barW: CGFloat = abs(x - half)
+            let barX: CGFloat = min(x, half)
+            let d: CGFloat = knobR * 2
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 16).fill(Color.wrPanel2)
+                Rectangle().fill(Color.wrLine)
+                    .frame(width: 2)
+                    .padding(.vertical, 10)
+                    .offset(x: half - 1)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.wrBlue.opacity(0.7))
+                    .frame(width: barW, height: 9)
+                    .offset(x: barX)
+                Circle()
+                    .fill(knobFill)
+                    .frame(width: d, height: d)
+                    .shadow(color: .black.opacity(0.55), radius: 7, y: 4)
+                    .offset(x: x - knobR)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in ble.steer = steerValue(at: g.location.x, width: w) }
+                    .onEnded { _ in ble.steer = 0 }
+            )
+        }
     }
 }
 
