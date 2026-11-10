@@ -3,8 +3,6 @@ import CoreBluetooth
 import UIKit
 
 struct BoatConfig {
-    var kp: Double = 3.0
-    var kd: Double = 0.8
     var trim: Double = 0
     var minL: Double = 60
     var minR: Double = 60
@@ -15,23 +13,27 @@ struct BoatConfig {
     var invL = false
     var invR = false
     var swapLR = false
-    var invGyro = false
     var legMs: Double = 4000
     var holdMs: Double = 12000
     var autoThr: Double = 180
 }
 
 struct Telemetry {
-    var heading: Double = 0
-    var target: Double = 0
     var pwmL: Int = 0
     var pwmR: Int = 0
-    var mode: Int = 0
+    var mode: Int = 0          // 0 Manual, 1 Auto mission
     var station: Int = 0
-    var missionState: Int = 0
-    var imuOk = true
+    var missionState: Int = 0  // 0 idle, 1 leg, 2 holding, 3 done
     var joyActive = false
     var watchdog = false
+    var learnReady = false
+}
+
+/// + slows the left motor, - slows the right motor
+func trimText(_ t: Double) -> String {
+    let v = Int(t.rounded())
+    if v == 0 { return "0" }
+    return v > 0 ? "Left -\(v)%" : "Right -\(-v)%"
 }
 
 enum LinkState {
@@ -137,13 +139,13 @@ final class BoatBLE: NSObject, ObservableObject {
     }
 
     func sendTrim()      { send("T,\(Int(cfg.trim))") }
-    func sendPD()        { send(String(format: "K,%.2f,%.2f", cfg.kp, cfg.kd)) }
+    func learnTrim()     { send("LT") }
     func sendMin()       { send("N,\(Int(cfg.minL)),\(Int(cfg.minR))") }
     func sendLimit()     { send("V,\(Int(cfg.maxPwm))") }
     func sendSteerShape()    { send("D,\(Int(cfg.deadzone)),\(Int(cfg.expo)),\(Int(cfg.ramp))") }
     func sendMission()   { send("E,\(Int(cfg.legMs)),\(Int(cfg.holdMs)),\(Int(cfg.autoThr))") }
     func sendDirs() {
-        send("I,\(cfg.invL ? 1 : 0),\(cfg.invR ? 1 : 0),\(cfg.swapLR ? 1 : 0),\(cfg.invGyro ? 1 : 0)")
+        send("I,\(cfg.invL ? 1 : 0),\(cfg.invR ? 1 : 0),\(cfg.swapLR ? 1 : 0)")
     }
 
     private func sendStick() {
@@ -170,35 +172,34 @@ final class BoatBLE: NSObject, ObservableObject {
         if line.isEmpty { return }
         if line.hasPrefix("H,") {
             let p = line.dropFirst(2).split(separator: ",").map { Int(String($0)) ?? 0 }
-            guard p.count >= 8 else { return }
+            guard p.count >= 7 else { return }
             var t = Telemetry()
-            t.heading = Double(p[0]) / 10
-            t.target = Double(p[1]) / 10
-            t.pwmL = p[2]
-            t.pwmR = p[3]
-            t.mode = p[4]
-            t.station = p[5]
-            t.missionState = p[6]
-            t.imuOk = (p[7] & 1) != 0
-            t.joyActive = (p[7] & 2) != 0
-            t.watchdog = (p[7] & 4) != 0
+            t.pwmL = p[0]
+            t.pwmR = p[1]
+            t.mode = p[2]
+            t.station = p[3]
+            t.missionState = p[4]
+            t.joyActive = (p[5] & 1) != 0
+            t.watchdog = (p[5] & 2) != 0
+            t.learnReady = (p[5] & 4) != 0
             tele = t
+            if Double(p[6]) != cfg.trim { cfg.trim = Double(p[6]) }
             if recording {
                 let time = String(format: "%.2f", Date().timeIntervalSince(recStart))
-                recRows.append("\(time),\(t.heading),\(t.target),\(t.pwmL),\(t.pwmR),\(t.mode),\(t.station),\(t.missionState),\(t.imuOk ? 1 : 0),\(throttle),\(steer)")
+                recRows.append("\(time),\(t.pwmL),\(t.pwmR),\(t.mode),\(t.station),\(t.missionState),\(Int(cfg.trim)),\(throttle),\(steer)")
                 recCount = recRows.count
             }
             return
         }
         if line.hasPrefix("CFG,") {
             let p = line.dropFirst(4).split(separator: ",").map { Double(String($0)) ?? 0 }
-            guard p.count >= 16 else { return }
+            guard p.count >= 13 else { return }
             var c = BoatConfig()
-            c.kp = p[0]; c.kd = p[1]; c.trim = p[2]
-            c.minL = p[3]; c.minR = p[4]; c.maxPwm = p[5]
-            c.deadzone = p[6]; c.expo = p[7]; c.ramp = p[8]
-            c.invL = p[9] != 0; c.invR = p[10] != 0; c.swapLR = p[11] != 0; c.invGyro = p[12] != 0
-            c.legMs = p[13]; c.holdMs = p[14]; c.autoThr = p[15]
+            c.trim = p[0]
+            c.minL = p[1]; c.minR = p[2]; c.maxPwm = p[3]
+            c.deadzone = p[4]; c.expo = p[5]; c.ramp = p[6]
+            c.invL = p[7] != 0; c.invR = p[8] != 0; c.swapLR = p[9] != 0
+            c.legMs = p[10]; c.holdMs = p[11]; c.autoThr = p[12]
             cfg = c
             addLog("Settings loaded from boat")
             return
@@ -238,7 +239,7 @@ final class BoatBLE: NSObject, ObservableObject {
 
     func exportCSV() -> URL? {
         guard !recRows.isEmpty else { return nil }
-        let header = "time_s,heading_deg,target_deg,pwm_left,pwm_right,mode,station,mission_state,imu_ok,throttle_cmd,steer_cmd\n"
+        let header = "time_s,pwm_left,pwm_right,mode,station,mission_state,trim_pct,throttle_cmd,steer_cmd\n"
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("waverider_\(f.string(from: Date())).csv")

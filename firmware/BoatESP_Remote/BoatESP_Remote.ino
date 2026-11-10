@@ -1,4 +1,4 @@
-// WaveRider boat ESP32: phone joystick + slow-decay PWM + trim + PD heading hold
+// WaveRider boat ESP32: phone joystick + slow-decay PWM + trim (+ learn trim) + timed auto mission
 // Board: ESP32 Dev Module, Partition Scheme: Huge APP
 // Talks to: WaveRider iPhone app, the Bluefy web page, nRF Toolbox UART, Serial Monitor (115200, Newline)
 
@@ -6,7 +6,6 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
-#include <Wire.h>
 #include <Preferences.h>
 
 #define BLE_DEVICE_NAME "WR-2-BOAT"
@@ -24,13 +23,7 @@
 #define M2A 32
 #define M2B 33
 
-#define STATION_PIN 13          // HIGH while the boat holds at a station (optional wire to XiaoSense D1)
-
-#define IMU_SDA   21            // MPU6050 (GY-521) SDA
-#define IMU_SCL   22            // MPU6050 (GY-521) SCL
-#define IMU_ADDR  0x68
-#define GYRO_SCALE 131.0        // LSB per deg/s at +-250 deg/s
-#define CAL_SAMPLES 200
+#define STATION_PIN 13          // HIGH while the boat holds at a station (optional wire)
 
 #define CONTROL_DT_MS 20        // control loop 50 Hz
 #define TELEMETRY_MS  200       // H line to the phone 5 Hz
@@ -38,9 +31,12 @@
 #define LEGACY_SPEED  200       // speed for the old single letters (F, X, L, R)
 #define NUM_STATIONS  5
 
+#define LEARN_MIN_PWM 60        // learn trim only counts when both motors get at least this
+#define LEARN_MIN_MS  2000      // and after this long of driving forward
+#define LEARN_TAU     1.5       // averaging time, seconds
+
 #define MODE_MANUAL 0
-#define MODE_ASSIST 1
-#define MODE_AUTO   2
+#define MODE_AUTO   1
 
 #define MS_IDLE 0
 #define MS_LEG  1
@@ -52,22 +48,19 @@
 
 // ---------------- settings (saved in flash with SAVE) ----------------
 struct Settings {
-  float kp;
-  float kd;
-  int   trim;      // -50..50 %. + slows the left motor, - slows the right motor
-  int   minL;      // PWM where the left motor starts turning
-  int   minR;      // PWM where the right motor starts turning
-  int   maxPwm;    // speed limit
-  int   deadzone;  // steering stick deadzone, %
-  int   expo;      // steering expo, %
-  int   ramp;      // max PWM change per 20 ms (0 = no ramp)
-  bool  invL;
-  bool  invR;
-  bool  swapLR;
-  bool  invGyro;
-  int   legMs;     // auto mission: drive time per leg
-  int   holdMs;    // auto mission: stop time at each station
-  int   autoThr;   // auto mission: throttle on each leg
+  int  trim;      // -50..50 %. + slows the left motor, - slows the right motor
+  int  minL;      // PWM where the left motor starts turning
+  int  minR;      // PWM where the right motor starts turning
+  int  maxPwm;    // speed limit
+  int  deadzone;  // steering stick deadzone, %
+  int  expo;      // steering expo, %
+  int  ramp;      // max PWM change per 20 ms (0 = no ramp)
+  bool invL;
+  bool invR;
+  bool swapLR;
+  int  legMs;     // auto mission: drive time per leg
+  int  holdMs;    // auto mission: stop time at each station
+  int  autoThr;   // auto mission: throttle on each leg
 };
 
 Settings cfg;
@@ -97,16 +90,11 @@ unsigned long lastJoyMs = 0;
 float outL = 0, outR = 0;    // after ramp, -255..255
 int   pwmL = 0, pwmR = 0;    // what actually goes to the pins (signed)
 
-bool  imuOk     = false;
-float gyroBiasZ = 0;
-float yawRate   = 0;         // deg/s, + = turning right
-float heading   = 0;         // deg, + = right of start, -180..180
-float target    = 0;
-bool  holdOn    = false;
+float learnL = 0, learnR = 0;   // average left/right command while driving forward
+float learnMs = 0;              // how long that average has been running
 
-int   missionState   = MS_IDLE;
-int   station        = 0;
-float missionHeading = 0;
+int   missionState = MS_IDLE;
+int   station      = 0;
 unsigned long stateStartMs = 0;
 
 unsigned long lastControlMs   = 0;
@@ -125,28 +113,19 @@ void reply(const char* msg) {
   notifyLine(msg);
 }
 
-float wrap180(float a) {
-  while (a > 180.0)  a -= 360.0;
-  while (a < -180.0) a += 360.0;
-  return a;
-}
-
 // ---------------- settings ----------------
 void setDefaults() {
-  cfg.kp = 3.0;  cfg.kd = 0.8;
   cfg.trim = 0;
   cfg.minL = 60; cfg.minR = 60;
   cfg.maxPwm = 255;
   cfg.deadzone = 5; cfg.expo = 30; cfg.ramp = 10;
-  cfg.invL = false; cfg.invR = false; cfg.swapLR = false; cfg.invGyro = false;
+  cfg.invL = false; cfg.invR = false; cfg.swapLR = false;
   cfg.legMs = 4000; cfg.holdMs = 12000; cfg.autoThr = 180;
 }
 
 void loadSettings() {
   setDefaults();
   prefs.begin("wr2", true);
-  cfg.kp       = prefs.getFloat("kp", cfg.kp);
-  cfg.kd       = prefs.getFloat("kd", cfg.kd);
   cfg.trim     = prefs.getInt("trim", cfg.trim);
   cfg.minL     = prefs.getInt("minL", cfg.minL);
   cfg.minR     = prefs.getInt("minR", cfg.minR);
@@ -157,7 +136,6 @@ void loadSettings() {
   cfg.invL     = prefs.getBool("invL", cfg.invL);
   cfg.invR     = prefs.getBool("invR", cfg.invR);
   cfg.swapLR   = prefs.getBool("swap", cfg.swapLR);
-  cfg.invGyro  = prefs.getBool("invG", cfg.invGyro);
   cfg.legMs    = prefs.getInt("legMs", cfg.legMs);
   cfg.holdMs   = prefs.getInt("holdMs", cfg.holdMs);
   cfg.autoThr  = prefs.getInt("autoThr", cfg.autoThr);
@@ -166,8 +144,6 @@ void loadSettings() {
 
 void saveSettings() {
   prefs.begin("wr2", false);
-  prefs.putFloat("kp", cfg.kp);
-  prefs.putFloat("kd", cfg.kd);
   prefs.putInt("trim", cfg.trim);
   prefs.putInt("minL", cfg.minL);
   prefs.putInt("minR", cfg.minR);
@@ -178,7 +154,6 @@ void saveSettings() {
   prefs.putBool("invL", cfg.invL);
   prefs.putBool("invR", cfg.invR);
   prefs.putBool("swap", cfg.swapLR);
-  prefs.putBool("invG", cfg.invGyro);
   prefs.putInt("legMs", cfg.legMs);
   prefs.putInt("holdMs", cfg.holdMs);
   prefs.putInt("autoThr", cfg.autoThr);
@@ -187,18 +162,18 @@ void saveSettings() {
 }
 
 void sendConfig() {
-  char line[160];
-  snprintf(line, sizeof(line),
-           "CFG,%.2f,%.2f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
-           cfg.kp, cfg.kd, cfg.trim, cfg.minL, cfg.minR, cfg.maxPwm,
+  char line[120];
+  snprintf(line, sizeof(line), "CFG,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
+           cfg.trim, cfg.minL, cfg.minR, cfg.maxPwm,
            cfg.deadzone, cfg.expo, cfg.ramp,
-           cfg.invL, cfg.invR, cfg.swapLR, cfg.invGyro,
+           cfg.invL, cfg.invR, cfg.swapLR,
            cfg.legMs, cfg.holdMs, cfg.autoThr);
   reply(line);
 }
 
 // ---------------- motors (slow decay: EN held HIGH, PWM on one IN pin) ----------------
 int driveMotor(int pinA, int pinB, float v, int pwmMin, bool inv) {
+  float cmd = v;                    // keep the sign before reversing, for the phone display
   if (inv) v = -v;
   int mag  = (int)fabs(v);
   int duty = 0;
@@ -217,8 +192,7 @@ int driveMotor(int pinA, int pinB, float v, int pwmMin, bool inv) {
     analogWrite(pinB, 0);
     duty = 0;
   }
-  if (inv) return (v < 0) ? duty : -duty;
-  return (v > 0) ? duty : -duty;
+  return (cmd >= 0) ? duty : -duty;
 }
 
 void writeMotors() {
@@ -246,90 +220,30 @@ void stopAll() {
   stickThr   = 0;
   stickSteer = 0;
   joyActive  = false;
+  learnMs    = 0;
   stopMotors();
 }
 
-// ---------------- IMU (MPU6050, registers read directly) ----------------
-void imuWrite(uint8_t reg, uint8_t val) {
-  Wire.beginTransmission(IMU_ADDR);
-  Wire.write(reg);
-  Wire.write(val);
-  Wire.endTransmission();
-}
-
-bool imuReadRegs(uint8_t reg, uint8_t* buf, uint8_t n) {
-  Wire.beginTransmission(IMU_ADDR);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom((uint8_t)IMU_ADDR, n) != n) return false;
-  for (uint8_t i = 0; i < n; i++) buf[i] = Wire.read();
-  return true;
-}
-
-bool imuBegin() {
-  Wire.begin(IMU_SDA, IMU_SCL);
-  Wire.setClock(400000);
-  Wire.beginTransmission(IMU_ADDR);
-  if (Wire.endTransmission() != 0) return false;
-
-  imuWrite(0x6B, 0x00);   // wake up
-  delay(100);
-  imuWrite(0x1A, 0x03);   // DLPF ~44 Hz
-  imuWrite(0x1B, 0x00);   // gyro +-250 deg/s
-
-  uint8_t who = 0;
-  imuReadRegs(0x75, &who, 1);
-  Serial.print("[IMU] WHO_AM_I = 0x");
-  Serial.println(who, HEX);
-  return true;
-}
-
-bool imuReadGyroZ(float &gz) {
-  uint8_t b[2];
-  if (!imuReadRegs(0x47, b, 2)) return false;
-  gz = (int16_t)(b[0] << 8 | b[1]) / GYRO_SCALE;
-  return true;
-}
-
-void calibrateGyro() {
-  if (!imuOk) {
-    reply("No IMU: nothing to calibrate");
+// ---------------- learn trim ----------------
+// Drive forward in Manual, hold whatever steering keeps the boat straight for 3 s,
+// then send LT. The steering you were holding becomes the trim.
+void learnTrim() {
+  if (learnMs < LEARN_MIN_MS || learnL < 1 || learnR < 1) {
+    reply("Learn trim: drive straight forward for 3 s first, then press it while still driving");
     return;
   }
-  stopAll();
-  reply("Calibrating gyro, keep the boat still...");
-  float sum = 0;
-  int good = 0;
-  for (int i = 0; i < CAL_SAMPLES; i++) {
-    float gz;
-    if (imuReadGyroZ(gz)) {
-      sum += gz;
-      good++;
-    }
-    delay(5);
-  }
-  if (good > 0) gyroBiasZ = sum / good;
-  heading = 0;
-  target  = 0;
-  char msg[48];
-  snprintf(msg, sizeof(msg), "Gyro calibrated, bias %.2f deg/s", gyroBiasZ);
+  float ratio = learnL / learnR;    // left/right split that kept the boat straight
+  int t;
+  if (ratio < 1.0) t = (int)(100.0 * (1.0 - ratio) + 0.5);          // needed less left: slow left (+)
+  else             t = -(int)(100.0 * (1.0 - 1.0 / ratio) + 0.5);   // needed less right: slow right (-)
+  cfg.trim = constrain(t, -50, 50);
+  char msg[64];
+  snprintf(msg, sizeof(msg), "Trim learned: %d%%. Press Save to keep it", cfg.trim);
   reply(msg);
+  sendConfig();
 }
 
-void updateImu(float dt) {
-  if (!imuOk) {
-    yawRate = 0;
-    return;
-  }
-  float gz;
-  if (!imuReadGyroZ(gz)) return;
-  float r = -(gz - gyroBiasZ);       // MPU z up: + gz = turning left, so flip to + = right
-  if (cfg.invGyro) r = -r;
-  yawRate = r;
-  heading = wrap180(heading + yawRate * dt);
-}
-
-// ---------------- mission ----------------
+// ---------------- mission (timed legs, trim keeps it straight) ----------------
 void beginHold() {
   missionState = MS_HOLD;
   stateStartMs = millis();
@@ -342,7 +256,6 @@ void beginHold() {
 void startLeg() {
   missionState = MS_LEG;
   stateStartMs = millis();
-  target = missionHeading;
   char msg[32];
   snprintf(msg, sizeof(msg), "Leg to station %d", station);
   reply(msg);
@@ -370,8 +283,6 @@ void startMission() {
   stopAll();
   mode = MODE_AUTO;
   station = 1;
-  missionHeading = heading;
-  if (!imuOk) reply("No IMU: legs run without heading hold");
   startLeg();
 }
 
@@ -402,7 +313,6 @@ void handleLegacy(char c) {
 }
 
 void handleMessage(char* line) {
-  // trim spaces at both ends
   while (*line == ' ') line++;
   int n = strlen(line);
   while (n > 0 && line[n - 1] == ' ') line[--n] = '\0';
@@ -413,15 +323,15 @@ void handleMessage(char* line) {
     return;
   }
 
-  if (strcmp(line, "GET") == 0)  { sendConfig();    return; }
-  if (strcmp(line, "SAVE") == 0) { saveSettings();  return; }
-  if (strcmp(line, "CAL") == 0)  { calibrateGyro(); return; }
+  if (strcmp(line, "GET") == 0)  { sendConfig();   return; }
+  if (strcmp(line, "SAVE") == 0) { saveSettings(); return; }
+  if (strcmp(line, "LT") == 0)   { learnTrim();    return; }
 
   // split "X,a,b,c" into tokens
-  char* tok[20];
+  char* tok[16];
   int count = 0;
   char* p = strtok(line, ",");
-  while (p != nullptr && count < 20) {
+  while (p != nullptr && count < 16) {
     tok[count++] = p;
     p = strtok(nullptr, ",");
   }
@@ -441,11 +351,8 @@ void handleMessage(char* line) {
   if (cmd == 'M' && count >= 2) {
     abortMission();
     stopMotors();
-    mode = constrain(atoi(tok[1]), 0, 2);
-    target = heading;
-    snprintf(msg, sizeof(msg), "Mode %s", mode == MODE_MANUAL ? "Manual" : (mode == MODE_ASSIST ? "Assist" : "Auto"));
-    reply(msg);
-    if (mode != MODE_MANUAL && !imuOk) reply("No IMU: heading hold is off");
+    mode = constrain(atoi(tok[1]), 0, 1);
+    reply(mode == MODE_MANUAL ? "Mode Manual" : "Mode Auto");
   } else if (cmd == 'Q' && count >= 2) {
     int q = atoi(tok[1]);
     if (q == 1) startMission();
@@ -457,12 +364,7 @@ void handleMessage(char* line) {
     }
   } else if (cmd == 'T' && count >= 2) {
     cfg.trim = constrain(atoi(tok[1]), -50, 50);
-    snprintf(msg, sizeof(msg), "Trim %d", cfg.trim);
-    reply(msg);
-  } else if (cmd == 'K' && count >= 3) {
-    cfg.kp = constrain(atof(tok[1]), 0.0, 50.0);
-    cfg.kd = constrain(atof(tok[2]), 0.0, 50.0);
-    snprintf(msg, sizeof(msg), "KP %.2f KD %.2f", cfg.kp, cfg.kd);
+    snprintf(msg, sizeof(msg), "Trim %d%%", cfg.trim);
     reply(msg);
   } else if (cmd == 'N' && count >= 3) {
     cfg.minL = constrain(atoi(tok[1]), 0, 254);
@@ -479,13 +381,12 @@ void handleMessage(char* line) {
     cfg.ramp     = constrain(atoi(tok[3]), 0, 255);
     snprintf(msg, sizeof(msg), "DZ %d Expo %d Ramp %d", cfg.deadzone, cfg.expo, cfg.ramp);
     reply(msg);
-  } else if (cmd == 'I' && count >= 5) {
-    cfg.invL    = atoi(tok[1]) != 0;
-    cfg.invR    = atoi(tok[2]) != 0;
-    cfg.swapLR  = atoi(tok[3]) != 0;
-    cfg.invGyro = atoi(tok[4]) != 0;
+  } else if (cmd == 'I' && count >= 4) {
+    cfg.invL   = atoi(tok[1]) != 0;
+    cfg.invR   = atoi(tok[2]) != 0;
+    cfg.swapLR = atoi(tok[3]) != 0;
     stopMotors();
-    reply("Motor/gyro directions set");
+    reply("Motor directions set");
   } else if (cmd == 'E' && count >= 4) {
     cfg.legMs   = constrain(atoi(tok[1]), 500, 60000);
     cfg.holdMs  = constrain(atoi(tok[2]), 0, 120000);
@@ -553,7 +454,6 @@ float shapeSteer(int s) {
 }
 
 void controlStep(float dt) {
-  updateImu(dt);
   unsigned long now = millis();
 
   // watchdog: phone stopped sending J
@@ -567,47 +467,27 @@ void controlStep(float dt) {
 
   float thr   = stickThr;
   float steer = shapeSteer(stickSteer);
-  holdOn = false;
 
   if (mode == MODE_AUTO) {
     steer = 0;
     if (missionState == MS_LEG) {
       thr = cfg.autoThr;
-      target = missionHeading;
-      holdOn = true;
       if (now - stateStartMs >= (unsigned long)cfg.legMs) beginHold();
     } else {
       thr = 0;
       if (missionState == MS_HOLD && now - stateStartMs >= (unsigned long)cfg.holdMs) endHold();
     }
-  } else if (mode == MODE_ASSIST) {
-    if (steer != 0 || thr == 0) {
-      target = heading;     // steering by hand: the lock follows you
-    } else {
-      holdOn = true;        // stick centred: hold the heading you let go at
-    }
-  } else {
-    target = heading;
   }
-
-  // PD on heading, D taken straight from the gyro rate
-  float u = 0;
-  if (holdOn && imuOk && thr != 0) {
-    float e = wrap180(target - heading);
-    u = cfg.kp * e - cfg.kd * yawRate;
-    u = constrain(u, -255.0, 255.0);
-  }
-  float s = steer + u;
 
   // mix, steering gets priority when a side saturates
-  float L = thr + s;
-  float R = thr - s;
+  float L = thr + steer;
+  float R = thr - steer;
   float over = max(fabs(L), fabs(R)) - 255.0;
   if (over > 0) {
     if (thr > 0)      thr = max(0.0f, thr - over);
     else if (thr < 0) thr = min(0.0f, thr + over);
-    L = constrain(thr + s, -255.0, 255.0);
-    R = constrain(thr - s, -255.0, 255.0);
+    L = constrain(thr + steer, -255.0, 255.0);
+    R = constrain(thr - steer, -255.0, 255.0);
   }
 
   // speed limit
@@ -617,6 +497,21 @@ void controlStep(float dt) {
   // trim: slow down the stronger motor
   if (cfg.trim > 0)      L *= (1.0 - cfg.trim / 100.0);
   else if (cfg.trim < 0) R *= (1.0 + cfg.trim / 100.0);
+
+  // learn trim: keep a running average while driving forward in Manual
+  if (mode == MODE_MANUAL && L >= LEARN_MIN_PWM && R >= LEARN_MIN_PWM) {
+    if (learnMs == 0) {
+      learnL = L;
+      learnR = R;
+    } else {
+      float a = dt / LEARN_TAU;
+      learnL += a * (L - learnL);
+      learnR += a * (R - learnR);
+    }
+    learnMs += dt * 1000.0;
+  } else {
+    learnMs = 0;
+  }
 
   // ramp
   if (cfg.ramp > 0) {
@@ -632,11 +527,10 @@ void controlStep(float dt) {
 
 void sendTelemetry() {
   if (!deviceConnected) return;
-  char line[64];
-  int flags = (imuOk ? 1 : 0) | (joyActive ? 2 : 0) | (watchdogTripped ? 4 : 0);
-  snprintf(line, sizeof(line), "H,%d,%d,%d,%d,%d,%d,%d,%d",
-           (int)(heading * 10), (int)(target * 10), pwmL, pwmR,
-           mode, station, missionState, flags);
+  char line[48];
+  int flags = (joyActive ? 1 : 0) | (watchdogTripped ? 2 : 0) | (learnMs >= LEARN_MIN_MS ? 4 : 0);
+  snprintf(line, sizeof(line), "H,%d,%d,%d,%d,%d,%d,%d",
+           pwmL, pwmR, mode, station, missionState, flags, cfg.trim);
   notifyLine(line);
 }
 
@@ -715,15 +609,9 @@ void setup() {
   digitalWrite(ENB, HIGH);
 
   loadSettings();
-  Serial.println("Settings loaded");
-
-  imuOk = imuBegin();
-  if (imuOk) {
-    Serial.println("[IMU] MPU6050 found");
-    calibrateGyro();
-  } else {
-    Serial.println("[IMU] NOT found on SDA 21 / SCL 22: Manual mode only, no heading hold");
-  }
+  Serial.print("Settings loaded, trim ");
+  Serial.print(cfg.trim);
+  Serial.println("%");
 
   Init_BLE();
 

@@ -53,17 +53,19 @@
   .zero { margin-top: 4px; }
 
   /* center */
-  .center { display: grid; grid-template-rows: auto auto auto auto minmax(40px, 1fr); gap: 5px; }
-  .navrow { display: flex; gap: 10px; align-items: center; justify-content: center; }
-  .compass { width: 92px; height: 92px; flex: none; }
-  .readout { display: grid; grid-template-columns: auto auto; gap: 2px 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
-  .readout b { font-size: 16px; }
-  .bars { display: grid; grid-template-columns: 16px 1fr 44px; gap: 4px 6px; align-items: center; font-size: 12px; }
-  .bar { position: relative; height: 12px; background: var(--panel2); border-radius: 6px; overflow: hidden; }
+  .center { display: grid; grid-template-rows: auto auto auto auto auto minmax(44px, 1fr); gap: 7px; }
+  .trimrow { display: grid; grid-template-columns: auto 44px 1fr 44px auto; gap: 6px; align-items: center; }
+  .trimrow .tb { font-size: 22px; font-weight: 700; padding: 4px 0; background: var(--panel2); border-radius: 10px; }
+  .trimrow .tv { text-align: center; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .trimrow .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--dim); }
+  .learn.ready { background: var(--accent); color: #062521; }
+  .status { font-size: 13px; color: var(--dim); text-align: center; min-height: 16px; }
+  .bars { display: grid; grid-template-columns: 16px 1fr 44px; gap: 6px 6px; align-items: center; font-size: 13px; }
+  .bar { position: relative; height: 16px; background: var(--panel2); border-radius: 6px; overflow: hidden; }
   .bar .z { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: var(--line); }
   .bar .v { position: absolute; top: 0; bottom: 0; background: var(--accent2); }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
-  .seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--panel2); border-radius: 10px; padding: 3px; gap: 3px; }
+  .seg { display: grid; grid-template-columns: repeat(2, 1fr); background: var(--panel2); border-radius: 10px; padding: 3px; gap: 3px; }
   .seg button { padding: 6px 0; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--dim); background: transparent; }
   .seg button.sel { background: var(--accent); color: #062521; }
   .seg button.off { opacity: .45; }
@@ -94,7 +96,7 @@
   .sheet-head h2 { margin: 0; font-size: 16px; flex: 1; }
   .sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: 10px 14px 20px; flex: 1; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 22px; }
-  .set { display: grid; grid-template-columns: 96px 1fr 52px; align-items: center; gap: 8px; font-size: 13px; }
+  .set { display: grid; grid-template-columns: 96px 1fr 84px; align-items: center; gap: 8px; font-size: 13px; }
   .set .val { text-align: right; font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
   .sec { font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin: 12px 0 4px; grid-column: 1 / -1; }
   .tog { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 5px 0; }
@@ -106,8 +108,8 @@
   .log { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; color: #cfe0ee; }
   .rec.on { background: var(--stop); color: white; }
 
-  .toast { position: fixed; left: 50%; top: 52px; transform: translateX(-50%); background: #08111b; border: 1px solid var(--line);
-    padding: 7px 14px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .25s; z-index: 30; pointer-events: none; max-width: 80vw; text-align: center; }
+  .toast { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: 46px; background: #08111b; border: 1px solid var(--line);
+    padding: 7px 14px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .25s; z-index: 30; pointer-events: none; max-width: 30vw; text-align: center; }
   .toast.show { opacity: 1; }
   .banner { position: fixed; left: 50%; top: 92px; transform: translateX(-50%); background: var(--stop); color: white; font-weight: 700;
     padding: 8px 18px; border-radius: 12px; z-index: 25; display: none; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
@@ -125,7 +127,6 @@
   <div class="top">
     <div class="brand">Wave<span>Rider</span></div>
     <div class="pill"><div class="dot" id="dot"></div><span id="connText">Not connected</span></div>
-    <span class="badge" id="imuBadge">No IMU</span>
     <span class="badge" id="wdBadge">Watchdog stop</span>
     <span class="badge" id="recBadge" style="background:#3a1418;color:#ff8a93">● REC</span>
     <div class="spacer"></div>
@@ -144,24 +145,12 @@
 
   <!-- center -->
   <div class="col center">
-    <div class="navrow">
-      <svg class="compass" viewBox="-60 -60 120 120" id="compass">
-        <circle r="56" fill="#0e1c2e" stroke="#27405f" stroke-width="2"/>
-        <g id="ticks"></g>
-        <text y="-40" text-anchor="middle" font-size="10" fill="#8aa4bd">0</text>
-        <text x="42" y="4" text-anchor="middle" font-size="10" fill="#8aa4bd">90</text>
-        <text x="-42" y="4" text-anchor="middle" font-size="10" fill="#8aa4bd">-90</text>
-        <text y="48" text-anchor="middle" font-size="10" fill="#8aa4bd">180</text>
-        <g id="tgtNeedle"><polygon points="0,-56 -6,-44 6,-44" fill="#f4a261"/></g>
-        <g id="boatNeedle"><polygon points="0,-38 9,10 0,4 -9,10" fill="#2ec4b6" stroke="#e8f1f8" stroke-width="1.2"/></g>
-      </svg>
-      <div class="readout">
-        <span>Heading</span><b id="hdg">0.0°</b>
-        <span>Target</span><b id="tgt" style="color:var(--warn)">0.0°</b>
-        <span>Error</span><span id="err">0.0°</span>
-        <span>Station</span><span id="stn">-</span>
-        <span>Mission</span><span id="mst" style="color:var(--dim)">-</span>
-      </div>
+    <div class="trimrow">
+      <span class="lbl">Trim</span>
+      <button class="tb" id="trimMinus">&lsaquo;</button>
+      <div class="tv" id="trimVal">0</div>
+      <button class="tb" id="trimPlus">&rsaquo;</button>
+      <button class="btn learn" id="learnBtn">Learn trim</button>
     </div>
     <div class="bars">
       <span>L</span><div class="bar"><div class="z"></div><div class="v" id="barL"></div></div><span class="num" id="pwmL">0</span>
@@ -169,8 +158,7 @@
     </div>
     <div class="seg" id="modeSeg">
       <button data-m="0" class="sel">Manual</button>
-      <button data-m="1">Assist</button>
-      <button data-m="2">Auto</button>
+      <button data-m="1">Auto mission</button>
     </div>
     <div>
       <div class="row" id="missionRow" style="display:none">
@@ -184,8 +172,8 @@
         <input type="range" min="0" max="255" value="255" id="limitMain">
         <span class="num" id="limitMainVal" style="width:32px">255</span>
       </div>
-      <div class="mission-state" id="missionState"></div>
     </div>
+    <div class="status" id="status">Not connected</div>
     <button class="stop" id="stopBtn">STOP</button>
   </div>
 
@@ -202,7 +190,6 @@
 <div class="sheet" id="setSheet"><div class="sheet-inner">
   <div class="sheet-head">
     <h2>Settings</h2>
-    <button class="btn" id="calBtn">Calibrate gyro</button>
     <button class="btn" id="getBtn">Reload</button>
     <button class="btn primary" id="saveBtn">Save to boat</button>
     <button class="btn" data-close>Done</button>
@@ -244,16 +231,13 @@ let recording = false, recRows = [], recStart = 0;
 let wakeLock = null;
 
 // ---------------- settings model ----------------
-const cfg = { kp: 3, kd: 0.8, trim: 0, minL: 60, minR: 60, max: 255, dz: 5, expo: 30, ramp: 10,
-              invL: 0, invR: 0, swap: 0, invG: 0, legMs: 4000, holdMs: 12000, autoThr: 180 };
+const cfg = { trim: 0, minL: 60, minR: 60, max: 255, dz: 5, expo: 30, ramp: 10,
+              invL: 0, invR: 0, swap: 0, legMs: 4000, holdMs: 12000, autoThr: 180 };
+const CFG_KEYS = ['trim','minL','minR','max','dz','expo','ramp','invL','invR','swap','legMs','holdMs','autoThr'];
 const sliders = [
   { sec: 'Trim (straight line)' },
-  { k: 'trim', name: 'Trim', min: -50, max: 50, step: 1, unit: '%', send: () => `T,${cfg.trim}` },
-  { hint: '+ slows the LEFT motor, - slows the RIGHT motor. Right motor slower = go negative.' },
-  { sec: 'Heading hold (PD)' },
-  { k: 'kp', name: 'KP', min: 0, max: 15, step: 0.1, fix: 1, send: () => `K,${cfg.kp},${cfg.kd}` },
-  { k: 'kd', name: 'KD', min: 0, max: 5, step: 0.05, fix: 2, send: () => `K,${cfg.kp},${cfg.kd}` },
-  { hint: 'KD = 0, raise KP until it snakes, halve it, then add KD until the snaking stops.' },
+  { k: 'trim', name: 'Trim', min: -50, max: 50, step: 1, txt: v => trimText(v), send: () => `T,${cfg.trim}` },
+  { hint: 'Boat pulls right (right motor weak)? slow the LEFT. Easiest: in Manual, drive forward holding the steering that keeps it straight for 3 s, then tap Learn trim. Save when happy.' },
   { sec: 'Motors' },
   { k: 'minL', name: 'PWM_MIN L', min: 0, max: 200, step: 1, send: () => `N,${cfg.minL},${cfg.minR}` },
   { k: 'minR', name: 'PWM_MIN R', min: 0, max: 200, step: 1, send: () => `N,${cfg.minL},${cfg.minR}` },
@@ -270,12 +254,13 @@ const sliders = [
   { tog: 'invL', name: 'Reverse left motor' },
   { tog: 'invR', name: 'Reverse right motor' },
   { tog: 'swap', name: 'Swap left / right' },
-  { tog: 'invG', name: 'Flip gyro (heading goes the wrong way)' },
 ];
-const dirSend = () => `I,${cfg.invL},${cfg.invR},${cfg.swap},${cfg.invG}`;
+function trimText(t) { t = Math.round(t); return t === 0 ? '0' : t > 0 ? `Left -${t}%` : `Right -${-t}%`; }
+const dirSend = () => `I,${cfg.invL},${cfg.invR},${cfg.swap}`;
 const ui = {};
 
 function fmt(s, v) {
+  if (s.txt) return s.txt(v);
   const x = s.scale ? v / s.scale : v;
   return (s.fix != null ? x.toFixed(s.fix) : x) + (s.unit || '');
 }
@@ -301,6 +286,7 @@ function buildSettings() {
     r.addEventListener('input', () => {
       cfg[s.k] = parseFloat(r.value); show();
       if (s.k === 'max') syncLimitMain();
+      if (s.k === 'trim') drawTrim();
       clearTimeout(timers[s.k]); timers[s.k] = setTimeout(() => sendCmd(s.send()), 120);
     });
     ui[s.k] = { set: val => { r.value = val; show(); } };
@@ -318,11 +304,23 @@ $('limitMain').addEventListener('input', e => {
 });
 
 function applyCfg(p) {
-  const keys = ['kp','kd','trim','minL','minR','max','dz','expo','ramp','invL','invR','swap','invG','legMs','holdMs','autoThr'];
-  keys.forEach((k, i) => { if (p[i] !== undefined) cfg[k] = parseFloat(p[i]); });
-  for (const k of keys) ui[k] && ui[k].set(cfg[k]);
-  syncLimitMain();
+  CFG_KEYS.forEach((k, i) => { if (p[i] !== undefined) cfg[k] = parseFloat(p[i]); });
+  for (const k of CFG_KEYS) ui[k] && ui[k].set(cfg[k]);
+  syncLimitMain(); drawTrim();
 }
+
+// ---------------- trim on the main screen ----------------
+function drawTrim() { $('trimVal').textContent = trimText(cfg.trim); }
+let trimTimer;
+function nudgeTrim(d) {
+  cfg.trim = Math.max(-50, Math.min(50, Math.round(cfg.trim) + d));
+  drawTrim(); ui.trim && ui.trim.set(cfg.trim);
+  clearTimeout(trimTimer); trimTimer = setTimeout(() => sendCmd(`T,${cfg.trim}`), 150);
+}
+// left arrow = boat goes more left = slow the left motor more / the right motor less
+$('trimMinus').addEventListener('click', () => nudgeTrim(1));
+$('trimPlus').addEventListener('click', () => nudgeTrim(-1));
+$('learnBtn').addEventListener('click', () => sendCmd('LT'));
 
 // ---------------- throttle (stays where you leave it) ----------------
 const thrEl = $('thr');
@@ -368,36 +366,22 @@ stEl.addEventListener('pointerup', steerRelease);
 stEl.addEventListener('pointercancel', steerRelease);
 stEl.addEventListener('lostpointercapture', steerRelease);
 
-// ---------------- compass ----------------
-(function ticks() {
-  let s = '';
-  for (let a = 0; a < 360; a += 15) {
-    const r1 = a % 90 === 0 ? 46 : 51, rad = a * Math.PI / 180;
-    s += `<line x1="${Math.sin(rad) * r1}" y1="${-Math.cos(rad) * r1}" x2="${Math.sin(rad) * 55}" y2="${-Math.cos(rad) * 55}" stroke="#3b5878" stroke-width="${a % 90 === 0 ? 2 : 1}"/>`;
-  }
-  $('ticks').innerHTML = s;
-})();
-
 // ---------------- telemetry ----------------
 const stateNames = ['Idle', 'Leg', 'Holding', 'Done'];
 function onTelemetry(p) {
-  const h = p[0] / 10, t = p[1] / 10, L = +p[2], R = +p[3], m = +p[4], st = +p[5], ms = +p[6], fl = +p[7];
-  $('boatNeedle').setAttribute('transform', `rotate(${h})`);
-  $('tgtNeedle').setAttribute('transform', `rotate(${t})`);
-  $('hdg').textContent = h.toFixed(1) + '°';
-  $('tgt').textContent = t.toFixed(1) + '°';
-  let e = t - h; while (e > 180) e -= 360; while (e < -180) e += 360;
-  $('err').textContent = e.toFixed(1) + '°';
-  $('stn').textContent = st ? `${st} / 5` : '-';
+  const L = +p[0], R = +p[1], m = +p[2], st = +p[3], ms = +p[4], fl = +p[5];
   bar('barL', L); bar('barR', R);
   $('pwmL').textContent = L; $('pwmR').textContent = R;
   if (m !== mode) setModeUI(m);
-  imuOk = !!(fl & 1);
-  $('imuBadge').classList.toggle('show', !imuOk);
-  $('wdBadge').classList.toggle('show', !!(fl & 4));
-  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('off', !imuOk && b.dataset.m !== '0'));
-  $('mst').textContent = m === 2 ? (ms === 1 ? `Leg to ${st}` : ms === 2 ? `Holding ${st}` : stateNames[ms]) : '-';
-  if (recording) recRows.push([((Date.now() - recStart) / 1000).toFixed(2), h, t, L, R, m, st, ms, fl & 1, thr, steer].join(','));
+  if (p[6] !== undefined && +p[6] !== Math.round(cfg.trim)) { cfg.trim = +p[6]; drawTrim(); ui.trim && ui.trim.set(cfg.trim); }
+  $('wdBadge').classList.toggle('show', !!(fl & 2));
+  $('learnBtn').classList.toggle('ready', !!(fl & 4));
+  if (m === 1) {
+    $('status').textContent = ms === 1 ? `Leg to station ${st} of 5` : ms === 2 ? `Holding at station ${st}` : ms === 3 ? 'Mission done' : 'Ready: press Start';
+  } else {
+    $('status').textContent = (fl & 4) ? 'Driving straight? tap Learn trim' : 'Manual';
+  }
+  if (recording) recRows.push([((Date.now() - recStart) / 1000).toFixed(2), L, R, m, st, ms, cfg.trim, thr, steer].join(','));
 }
 function bar(id, v) {
   const el = $(id), w = Math.abs(v) / 255 * 50;
@@ -407,8 +391,8 @@ function bar(id, v) {
 function setModeUI(m) {
   mode = m;
   document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('sel', +b.dataset.m === m));
-  $('missionRow').style.display = m === 2 ? 'flex' : 'none';
-  $('limitRow').style.display = m === 2 ? 'none' : 'flex';
+  $('missionRow').style.display = m === 1 ? 'flex' : 'none';
+  $('limitRow').style.display = m === 1 ? 'none' : 'flex';
 }
 document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', () => {
   const m = +b.dataset.m; setModeUI(m); sendCmd(`M,${m}`);
@@ -443,6 +427,7 @@ async function openGatt() {
   connected = true; queue = []; pendingJ = null; writing = false;
   thr = 0; steer = 0; drawThr(); drawSteer();
   setConn('on', device.name || 'Boat');
+  $('status').textContent = 'Manual';
   $('banner').classList.remove('show');
   sendCmd('GET');
   requestWake();
@@ -519,7 +504,6 @@ async function requestWake() {
 $('setBtn').addEventListener('click', () => $('setSheet').classList.add('show'));
 $('logBtn').addEventListener('click', () => $('logSheet').classList.add('show'));
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('.sheet').classList.remove('show')));
-$('calBtn').addEventListener('click', () => sendCmd('CAL'));
 $('getBtn').addEventListener('click', () => sendCmd('GET'));
 $('saveBtn').addEventListener('click', () => sendCmd('SAVE'));
 
@@ -537,7 +521,7 @@ $('recBtn').addEventListener('click', () => {
 });
 $('csvBtn').addEventListener('click', async () => {
   if (!recRows.length) { toast('Nothing recorded yet'); return; }
-  const csv = 'time_s,heading_deg,target_deg,pwm_left,pwm_right,mode,station,mission_state,imu_ok,throttle_cmd,steer_cmd\n' + recRows.join('\n');
+  const csv = 'time_s,pwm_left,pwm_right,mode,station,mission_state,trim_pct,throttle_cmd,steer_cmd\n' + recRows.join('\n');
   const name = `waverider_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
   const file = new File([csv], name, { type: 'text/csv' });
   try {
@@ -550,7 +534,7 @@ let toastTimer;
 function toast(s) { const t = $('toast'); t.textContent = s; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200); }
 
 // ---------------- start ----------------
-buildSettings(); syncLimitMain(); drawThr(); drawSteer(); setModeUI(0);
+buildSettings(); syncLimitMain(); drawTrim(); drawThr(); drawSteer(); setModeUI(0);
 window.addEventListener('resize', () => { drawThr(); drawSteer(); });
 if (!navigator.bluetooth) $('nobt').classList.add('show');
 </script>

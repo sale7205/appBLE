@@ -18,7 +18,6 @@ struct SettingsView: View {
             HStack(spacing: 8) {
                 Text("Settings").font(.headline)
                 Spacer()
-                Button("Calibrate gyro") { ble.send("CAL") }.buttonStyle(PanelButton())
                 Button("Reload") { ble.send("GET") }.buttonStyle(PanelButton())
                 Button("Save to boat") { ble.send("SAVE") }.buttonStyle(PanelButton(primary: true))
                 Button("Done") { dismiss() }.buttonStyle(PanelButton())
@@ -31,15 +30,10 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         section("Trim (straight line)")
                         SettingSlider(title: "Trim", value: $ble.cfg.trim, range: -50...50, step: 1,
-                                      format: { "\(Int($0))%" }) { ble.sendTrim() }
-                        hint("+ slows the LEFT motor, - slows the RIGHT motor. Right motor slower = go negative.")
-
-                        section("Heading hold (PD)")
-                        SettingSlider(title: "KP", value: $ble.cfg.kp, range: 0...15, step: 0.1,
-                                      format: { String(format: "%.1f", $0) }) { ble.sendPD() }
-                        SettingSlider(title: "KD", value: $ble.cfg.kd, range: 0...5, step: 0.05,
-                                      format: { String(format: "%.2f", $0) }) { ble.sendPD() }
-                        hint("KD = 0, raise KP until it snakes, halve it, then add KD until the snaking stops.")
+                                      format: { trimText($0) }) { ble.sendTrim() }
+                        Button("Learn trim") { ble.learnTrim() }
+                            .buttonStyle(PanelButton(primary: ble.tele.learnReady))
+                        hint("Boat pulls right (right motor weak)? slow the LEFT. Easiest: in Manual, drive forward holding the steering that keeps it straight for 3 s, then tap Learn trim. Save when happy.")
 
                         section("Motors")
                         SettingSlider(title: "PWM_MIN L", value: $ble.cfg.minL, range: 0...200, step: 1,
@@ -72,7 +66,6 @@ struct SettingsView: View {
                         Toggle("Reverse left motor", isOn: dirBinding(\.invL))
                         Toggle("Reverse right motor", isOn: dirBinding(\.invR))
                         Toggle("Swap left / right", isOn: dirBinding(\.swapLR))
-                        Toggle("Flip gyro (heading goes the wrong way)", isOn: dirBinding(\.invGyro))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -115,7 +108,7 @@ struct SettingSlider: View {
             Text(format(value))
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundColor(.wrAccent)
-                .frame(width: 70, alignment: .trailing)
+                .frame(width: 96, alignment: .trailing)
         }
     }
 }

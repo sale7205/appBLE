@@ -95,7 +95,6 @@ struct TopBar: View {
             .padding(.horizontal, 12).padding(.vertical, 6)
             .background(Capsule().fill(Color.wrPanel))
 
-            if ble.link == .connected && !ble.tele.imuOk { badge("No IMU") }
             if ble.tele.watchdog { badge("Watchdog stop") }
             if ble.recording { badge("● REC") }
 
@@ -240,61 +239,70 @@ struct SteerPanel: View {
 
 struct CenterPanel: View {
     @EnvironmentObject var ble: BoatBLE
-    let modeNames = ["Manual", "Assist", "Auto"]
+    @State private var trimWork: DispatchWorkItem?
 
-    var errorDeg: Double {
-        var e = ble.tele.target - ble.tele.heading
-        while e > 180 { e -= 360 }
-        while e < -180 { e += 360 }
-        return e
+    var statusText: String {
+        guard ble.link == .connected else { return "Not connected" }
+        if ble.tele.mode == 1 {
+            switch ble.tele.missionState {
+            case 1: return "Leg to station \(ble.tele.station) of 5"
+            case 2: return "Holding at station \(ble.tele.station)"
+            case 3: return "Mission done"
+            default: return "Ready: press Start"
+            }
+        }
+        return ble.tele.learnReady ? "Driving straight? tap Learn trim" : "Manual"
     }
 
-    var missionText: String {
-        guard ble.tele.mode == 2 else { return "-" }
-        switch ble.tele.missionState {
-        case 1: return "Leg to \(ble.tele.station)"
-        case 2: return "Holding \(ble.tele.station)"
-        case 3: return "Done"
-        default: return "Idle"
-        }
+    // left arrow = boat goes more left = slow the left motor more (trim +)
+    func nudgeTrim(_ d: Double) {
+        ble.cfg.trim = max(-50, min(50, ble.cfg.trim.rounded() + d))
+        trimWork?.cancel()
+        let w = DispatchWorkItem { ble.sendTrim() }
+        trimWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: w)
     }
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 14) {
-                CompassView(heading: ble.tele.heading, target: ble.tele.target)
-                    .frame(width: 92, height: 92)
-                VStack(alignment: .leading, spacing: 1) {
-                    readout("Heading", String(format: "%.1f°", ble.tele.heading), .white, big: true)
-                    readout("Target", String(format: "%.1f°", ble.tele.target), .wrWarn, big: true)
-                    readout("Error", String(format: "%.1f°", errorDeg), .white)
-                    readout("Station", ble.tele.station > 0 ? "\(ble.tele.station) / 5" : "-", .white)
-                    readout("Mission", missionText, .wrDim)
+        VStack(spacing: 7) {
+            HStack(spacing: 6) {
+                Text("TRIM").font(.caption2).tracking(1).foregroundColor(.wrDim)
+                Button { nudgeTrim(1) } label: {
+                    Image(systemName: "chevron.left").font(.headline).frame(width: 40, height: 30)
                 }
+                .buttonStyle(PanelButton())
+                Text(trimText(ble.cfg.trim))
+                    .font(.title3.bold().monospacedDigit())
+                    .frame(maxWidth: .infinity)
+                Button { nudgeTrim(-1) } label: {
+                    Image(systemName: "chevron.right").font(.headline).frame(width: 40, height: 30)
+                }
+                .buttonStyle(PanelButton())
+                Button("Learn trim") { ble.learnTrim() }
+                    .buttonStyle(PanelButton(primary: ble.tele.learnReady))
             }
 
             PWMBar(label: "L", value: ble.tele.pwmL)
             PWMBar(label: "R", value: ble.tele.pwmR)
 
             HStack(spacing: 3) {
-                ForEach(0..<3) { m in
+                ForEach(0..<2) { m in
                     Button {
                         ble.setMode(m)
                     } label: {
-                        Text(modeNames[m])
+                        Text(m == 0 ? "Manual" : "Auto mission")
                             .font(.footnote.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 7)
                             .background(RoundedRectangle(cornerRadius: 8).fill(ble.tele.mode == m ? Color.wrAccent : Color.clear))
                             .foregroundColor(ble.tele.mode == m ? Color(red: 0.02, green: 0.15, blue: 0.13) : .wrDim)
                     }
-                    .opacity(!ble.tele.imuOk && m != 0 ? 0.45 : 1)
                 }
             }
             .padding(3)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.wrPanel2))
 
-            if ble.tele.mode == 2 {
+            if ble.tele.mode == 1 {
                 HStack(spacing: 6) {
                     Button("Start") { ble.send("Q,1") }.buttonStyle(PanelButton(primary: true, fill: true))
                     Button("Arrived") { ble.send("Q,2") }.buttonStyle(PanelButton(fill: true))
@@ -312,13 +320,15 @@ struct CenterPanel: View {
                 }
             }
 
+            Text(statusText).font(.footnote).foregroundColor(.wrDim)
+
             Button {
                 ble.stopNow()
             } label: {
                 Text("STOP")
                     .font(.title2.weight(.heavy))
                     .tracking(3)
-                    .frame(maxWidth: .infinity, minHeight: 40, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 44, maxHeight: .infinity)
                     .background(RoundedRectangle(cornerRadius: 14).fill(Color.wrStop))
                     .foregroundColor(.white)
             }
@@ -326,15 +336,6 @@ struct CenterPanel: View {
         .padding(8)
         .frame(maxHeight: .infinity)
         .background(RoundedRectangle(cornerRadius: 16).fill(Color.wrPanel))
-    }
-
-    func readout(_ name: String, _ value: String, _ color: Color, big: Bool = false) -> some View {
-        HStack(spacing: 8) {
-            Text(name).font(.caption).foregroundColor(.white).frame(width: 54, alignment: .leading)
-            Text(value)
-                .font(big ? .subheadline.bold().monospacedDigit() : .caption.monospacedDigit())
-                .foregroundColor(color)
-        }
     }
 }
 
@@ -359,70 +360,8 @@ struct PWMBar: View {
                 }
                 .clipShape(Capsule())
             }
-            .frame(height: 12)
+            .frame(height: 16)
             Text("\(value)").font(.caption.monospacedDigit()).frame(width: 38, alignment: .trailing)
         }
-    }
-}
-
-// MARK: - Compass
-
-struct CompassView: View {
-    let heading: Double
-    let target: Double
-
-    var body: some View {
-        GeometryReader { g in
-            let s = min(g.size.width, g.size.height)
-            ZStack {
-                Circle().fill(Color(red: 0.055, green: 0.11, blue: 0.18))
-                Circle().stroke(Color.wrLine, lineWidth: 2)
-                ForEach(0..<24) { i in
-                    Rectangle()
-                        .fill(Color(red: 0.23, green: 0.35, blue: 0.47))
-                        .frame(width: i % 6 == 0 ? 2 : 1, height: i % 6 == 0 ? 9 : 5)
-                        .offset(y: -s / 2 + (i % 6 == 0 ? 6.5 : 4.5))
-                        .rotationEffect(.degrees(Double(i) * 15))
-                }
-                Text("0").font(.system(size: 9)).foregroundColor(.wrDim).offset(y: -s / 2 + 18)
-                Text("90").font(.system(size: 9)).foregroundColor(.wrDim).offset(x: s / 2 - 20)
-                Text("-90").font(.system(size: 9)).foregroundColor(.wrDim).offset(x: -s / 2 + 20)
-                Text("180").font(.system(size: 9)).foregroundColor(.wrDim).offset(y: s / 2 - 18)
-                InwardTriangle()
-                    .fill(Color.wrWarn)
-                    .frame(width: 11, height: 10)
-                    .offset(y: -s / 2 + 5)
-                    .rotationEffect(.degrees(target))
-                BoatArrow()
-                    .fill(Color.wrAccent)
-                    .overlay(BoatArrow().stroke(Color.white, lineWidth: 1))
-                    .frame(width: s * 0.28, height: s * 0.6)
-                    .rotationEffect(.degrees(heading))
-            }
-            .frame(width: s, height: s)
-        }
-    }
-}
-
-struct InwardTriangle: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
-        p.closeSubpath()
-        return p
-    }
-}
-
-struct BoatArrow: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.midX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.midX, y: r.minY + r.height * 0.82))
-        p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
-        p.closeSubpath()
-        return p
     }
 }
