@@ -1,0 +1,32 @@
+name: WaveRider
+options:
+  bundleIdPrefix: com.salehaldhafeeri
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  WaveRider:
+    type: application
+    platform: iOS
+    sources:
+      - WaveRider
+    scheme: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.salehaldhafeeri.waverider
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+    info:
+      path: WaveRider/Info.plist
+      properties:
+        CFBundleDisplayName: WaveRider
+        NSBluetoothAlwaysUsageDescription: WaveRider uses Bluetooth to drive your boat.
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UILaunchScreen: {}

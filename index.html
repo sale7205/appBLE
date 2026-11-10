@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0b1622">
+<title>WaveRider Remote</title>
+<style>
+  :root {
+    --bg: #0b1622; --panel: #13243a; --panel2: #1a304c; --line: #27405f;
+    --text: #e8f1f8; --dim: #8aa4bd; --accent: #2ec4b6; --accent2: #4da3ff;
+    --warn: #f4a261; --stop: #e63946; --ok: #52d273;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; overflow: hidden;
+    -webkit-user-select: none; user-select: none; overscroll-behavior: none; touch-action: none; }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  .app { position: fixed; inset: 0; display: grid;
+    padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    grid-template-columns: minmax(110px, 1fr) minmax(300px, 2.3fr) minmax(150px, 1.4fr);
+    grid-template-rows: 40px 1fr; gap: 8px; }
+
+  /* top bar */
+  .top { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+  .brand { font-weight: 700; letter-spacing: .3px; font-size: 15px; }
+  .brand span { color: var(--accent); }
+  .pill { padding: 6px 12px; border-radius: 999px; background: var(--panel); font-size: 13px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--stop); }
+  .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.wait { background: var(--warn); }
+  .spacer { flex: 1; }
+  .btn { background: var(--panel2); padding: 7px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: #062521; }
+  .btn:active { filter: brightness(1.3); }
+  .badge { font-size: 11px; padding: 3px 7px; border-radius: 6px; background: #3a2a14; color: var(--warn); display: none; }
+  .badge.show { display: inline-block; }
+
+  /* panels */
+  .col { background: var(--panel); border-radius: 16px; padding: 8px; display: flex; flex-direction: column; min-height: 0; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--dim); text-align: center; }
+  .big { font-size: 22px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+
+  /* throttle */
+  .thr-wrap { flex: 1; display: flex; justify-content: center; min-height: 0; padding: 6px 0; }
+  .thr { position: relative; width: 64px; height: 100%; border-radius: 14px; background: var(--panel2); touch-action: none; }
+  .thr .mid { position: absolute; left: 6px; right: 6px; top: 50%; height: 2px; background: var(--line); }
+  .thr .fill { position: absolute; left: 0; right: 0; border-radius: 14px; background: linear-gradient(var(--accent), #1b8f84); opacity: .55; }
+  .thr .fill.rev { background: linear-gradient(#b5651d, var(--warn)); }
+  .thr .knob { position: absolute; left: -6px; right: -6px; height: 34px; margin-top: -17px; border-radius: 10px;
+    background: #f1f6fb; box-shadow: 0 3px 10px rgba(0,0,0,.5); display: grid; place-items: center; color: #0b1622; font-weight: 800; font-size: 13px; }
+  .zero { margin-top: 4px; }
+
+  /* center */
+  .center { display: grid; grid-template-rows: auto auto auto auto minmax(40px, 1fr); gap: 5px; }
+  .navrow { display: flex; gap: 10px; align-items: center; justify-content: center; }
+  .compass { width: 92px; height: 92px; flex: none; }
+  .readout { display: grid; grid-template-columns: auto auto; gap: 2px 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .readout b { font-size: 16px; }
+  .bars { display: grid; grid-template-columns: 16px 1fr 44px; gap: 4px 6px; align-items: center; font-size: 12px; }
+  .bar { position: relative; height: 12px; background: var(--panel2); border-radius: 6px; overflow: hidden; }
+  .bar .z { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: var(--line); }
+  .bar .v { position: absolute; top: 0; bottom: 0; background: var(--accent2); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--panel2); border-radius: 10px; padding: 3px; gap: 3px; }
+  .seg button { padding: 6px 0; border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--dim); background: transparent; }
+  .seg button.sel { background: var(--accent); color: #062521; }
+  .seg button.off { opacity: .45; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row .btn { flex: 1; padding: 7px 4px; }
+  .mission-state { display: none; }
+  input[type=range] { -webkit-appearance: none; appearance: none; flex: 1; height: 30px; background: transparent; touch-action: none; }
+  input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--panel2); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -9px; border-radius: 50%; background: var(--text); box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+  .stop { background: var(--stop); color: white; font-weight: 800; font-size: 22px; letter-spacing: 3px; border-radius: 14px; min-height: 40px; box-shadow: 0 4px 14px rgba(230,57,70,.35); }
+  .stop:active { transform: scale(.98); filter: brightness(1.2); }
+
+  /* steering */
+  .steer-wrap { flex: 1; display: flex; align-items: center; min-height: 0; }
+  .steer { position: relative; width: 100%; height: 110px; border-radius: 16px; background: var(--panel2); touch-action: none; }
+  .steer .mid { position: absolute; top: 10px; bottom: 10px; left: 50%; width: 2px; background: var(--line); }
+  .steer .fill { position: absolute; top: 46%; height: 8%; background: var(--accent2); opacity: .7; border-radius: 4px; }
+  .steer .knob { position: absolute; top: 50%; width: 62px; height: 62px; margin: -31px 0 0 -31px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #ffffff, #c9d6e3); box-shadow: 0 4px 14px rgba(0,0,0,.55); }
+  .arrows { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; padding: 0 4px; }
+
+  /* sheets */
+  .sheet { position: fixed; inset: 0; background: rgba(5,10,16,.92); display: none; z-index: 20; }
+  .sheet.show { display: block; }
+  .sheet-inner { position: absolute; inset: max(10px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+    background: var(--panel); border-radius: 18px; display: flex; flex-direction: column; overflow: hidden; }
+  .sheet-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .sheet-head h2 { margin: 0; font-size: 16px; flex: 1; }
+  .sheet-body { overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: 10px 14px 20px; flex: 1; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 22px; }
+  .set { display: grid; grid-template-columns: 96px 1fr 52px; align-items: center; gap: 8px; font-size: 13px; }
+  .set .val { text-align: right; font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 600; }
+  .sec { font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin: 12px 0 4px; grid-column: 1 / -1; }
+  .tog { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 5px 0; }
+  .switch { width: 46px; height: 26px; border-radius: 13px; background: var(--panel2); position: relative; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--dim); transition: .15s; }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { left: 23px; background: white; }
+  .hint { font-size: 12px; color: var(--dim); margin: 2px 0 6px; grid-column: 1 / -1; }
+  .log { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; color: #cfe0ee; }
+  .rec.on { background: var(--stop); color: white; }
+
+  .toast { position: fixed; left: 50%; top: 52px; transform: translateX(-50%); background: #08111b; border: 1px solid var(--line);
+    padding: 7px 14px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .25s; z-index: 30; pointer-events: none; max-width: 80vw; text-align: center; }
+  .toast.show { opacity: 1; }
+  .banner { position: fixed; left: 50%; top: 92px; transform: translateX(-50%); background: var(--stop); color: white; font-weight: 700;
+    padding: 8px 18px; border-radius: 12px; z-index: 25; display: none; font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  .banner.show { display: block; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .7; } }
+
+  .rotate { position: fixed; inset: 0; background: var(--bg); z-index: 50; display: none; place-items: center; text-align: center; padding: 30px; font-size: 18px; }
+  @media (orientation: portrait) { .rotate { display: grid; } }
+  .nobt { position: fixed; inset: 0; background: var(--bg); z-index: 40; display: none; place-items: center; text-align: center; padding: 30px; }
+  .nobt.show { display: grid; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand">Wave<span>Rider</span></div>
+    <div class="pill"><div class="dot" id="dot"></div><span id="connText">Not connected</span></div>
+    <span class="badge" id="imuBadge">No IMU</span>
+    <span class="badge" id="wdBadge">Watchdog stop</span>
+    <span class="badge" id="recBadge" style="background:#3a1418;color:#ff8a93">● REC</span>
+    <div class="spacer"></div>
+    <button class="btn" id="logBtn">Log</button>
+    <button class="btn" id="setBtn">Settings</button>
+    <button class="btn primary" id="connBtn">Connect</button>
+  </div>
+
+  <!-- throttle -->
+  <div class="col">
+    <div class="label">Throttle</div>
+    <div class="big" id="thrVal">0</div>
+    <div class="thr-wrap"><div class="thr" id="thr"><div class="mid"></div><div class="fill" id="thrFill"></div><div class="knob" id="thrKnob">0</div></div></div>
+    <button class="btn zero" id="thrZero">Zero</button>
+  </div>
+
+  <!-- center -->
+  <div class="col center">
+    <div class="navrow">
+      <svg class="compass" viewBox="-60 -60 120 120" id="compass">
+        <circle r="56" fill="#0e1c2e" stroke="#27405f" stroke-width="2"/>
+        <g id="ticks"></g>
+        <text y="-40" text-anchor="middle" font-size="10" fill="#8aa4bd">0</text>
+        <text x="42" y="4" text-anchor="middle" font-size="10" fill="#8aa4bd">90</text>
+        <text x="-42" y="4" text-anchor="middle" font-size="10" fill="#8aa4bd">-90</text>
+        <text y="48" text-anchor="middle" font-size="10" fill="#8aa4bd">180</text>
+        <g id="tgtNeedle"><polygon points="0,-56 -6,-44 6,-44" fill="#f4a261"/></g>
+        <g id="boatNeedle"><polygon points="0,-38 9,10 0,4 -9,10" fill="#2ec4b6" stroke="#e8f1f8" stroke-width="1.2"/></g>
+      </svg>
+      <div class="readout">
+        <span>Heading</span><b id="hdg">0.0°</b>
+        <span>Target</span><b id="tgt" style="color:var(--warn)">0.0°</b>
+        <span>Error</span><span id="err">0.0°</span>
+        <span>Station</span><span id="stn">-</span>
+        <span>Mission</span><span id="mst" style="color:var(--dim)">-</span>
+      </div>
+    </div>
+    <div class="bars">
+      <span>L</span><div class="bar"><div class="z"></div><div class="v" id="barL"></div></div><span class="num" id="pwmL">0</span>
+      <span>R</span><div class="bar"><div class="z"></div><div class="v" id="barR"></div></div><span class="num" id="pwmR">0</span>
+    </div>
+    <div class="seg" id="modeSeg">
+      <button data-m="0" class="sel">Manual</button>
+      <button data-m="1">Assist</button>
+      <button data-m="2">Auto</button>
+    </div>
+    <div>
+      <div class="row" id="missionRow" style="display:none">
+        <button class="btn primary" data-q="1">Start</button>
+        <button class="btn" data-q="2">Arrived</button>
+        <button class="btn" data-q="3">Next</button>
+        <button class="btn" data-q="0">Abort</button>
+      </div>
+      <div class="row" id="limitRow">
+        <span style="font-size:12px;color:var(--dim)">Max</span>
+        <input type="range" min="0" max="255" value="255" id="limitMain">
+        <span class="num" id="limitMainVal" style="width:32px">255</span>
+      </div>
+      <div class="mission-state" id="missionState"></div>
+    </div>
+    <button class="stop" id="stopBtn">STOP</button>
+  </div>
+
+  <!-- steering -->
+  <div class="col">
+    <div class="label">Steering</div>
+    <div class="big" id="steerVal">0</div>
+    <div class="steer-wrap"><div class="steer" id="steer"><div class="mid"></div><div class="fill" id="steerFill"></div><div class="knob" id="steerKnob"></div></div></div>
+    <div class="arrows"><span>◀ Left</span><span>Right ▶</span></div>
+  </div>
+</div>
+
+<!-- settings sheet -->
+<div class="sheet" id="setSheet"><div class="sheet-inner">
+  <div class="sheet-head">
+    <h2>Settings</h2>
+    <button class="btn" id="calBtn">Calibrate gyro</button>
+    <button class="btn" id="getBtn">Reload</button>
+    <button class="btn primary" id="saveBtn">Save to boat</button>
+    <button class="btn" data-close>Done</button>
+  </div>
+  <div class="sheet-body"><div class="grid2" id="setGrid"></div></div>
+</div></div>
+
+<!-- log sheet -->
+<div class="sheet" id="logSheet"><div class="sheet-inner">
+  <div class="sheet-head">
+    <h2>Log</h2>
+    <button class="btn rec" id="recBtn">Record</button>
+    <button class="btn" id="csvBtn">Export CSV</button>
+    <button class="btn" id="clearBtn">Clear</button>
+    <button class="btn" data-close>Done</button>
+  </div>
+  <div class="sheet-body"><div class="log" id="log"></div></div>
+</div></div>
+
+<div class="banner" id="banner">Connection lost, reconnecting…</div>
+<div class="toast" id="toast"></div>
+<div class="rotate">Turn your phone sideways ↻</div>
+<div class="nobt" id="nobt"><div>
+  <h2>Bluetooth not available here</h2>
+  <p style="color:var(--dim)">Safari can't talk to Bluetooth. Open this page in the <b>Bluefy</b> app on your iPhone (or Chrome on a laptop).</p>
+</div></div>
+
+<script>
+const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const RX  = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';   // phone writes here
+const TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';   // boat notifies here
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+
+let device = null, rxChar = null, connected = false, userDisconnect = false;
+let thr = 0, steer = 0, mode = 0, imuOk = true;
+let queue = [], pendingJ = null, writing = false;
+let recording = false, recRows = [], recStart = 0;
+let wakeLock = null;
+
+// ---------------- settings model ----------------
+const cfg = { kp: 3, kd: 0.8, trim: 0, minL: 60, minR: 60, max: 255, dz: 5, expo: 30, ramp: 10,
+              invL: 0, invR: 0, swap: 0, invG: 0, legMs: 4000, holdMs: 12000, autoThr: 180 };
+const sliders = [
+  { sec: 'Trim (straight line)' },
+  { k: 'trim', name: 'Trim', min: -50, max: 50, step: 1, unit: '%', send: () => `T,${cfg.trim}` },
+  { hint: '+ slows the LEFT motor, - slows the RIGHT motor. Right motor slower = go negative.' },
+  { sec: 'Heading hold (PD)' },
+  { k: 'kp', name: 'KP', min: 0, max: 15, step: 0.1, fix: 1, send: () => `K,${cfg.kp},${cfg.kd}` },
+  { k: 'kd', name: 'KD', min: 0, max: 5, step: 0.05, fix: 2, send: () => `K,${cfg.kp},${cfg.kd}` },
+  { hint: 'KD = 0, raise KP until it snakes, halve it, then add KD until the snaking stops.' },
+  { sec: 'Motors' },
+  { k: 'minL', name: 'PWM_MIN L', min: 0, max: 200, step: 1, send: () => `N,${cfg.minL},${cfg.minR}` },
+  { k: 'minR', name: 'PWM_MIN R', min: 0, max: 200, step: 1, send: () => `N,${cfg.minL},${cfg.minR}` },
+  { k: 'max',  name: 'Speed limit', min: 0, max: 255, step: 1, send: () => `V,${cfg.max}` },
+  { k: 'ramp', name: 'Ramp', min: 0, max: 60, step: 1, unit: '/20ms', send: () => `D,${cfg.dz},${cfg.expo},${cfg.ramp}` },
+  { sec: 'Steering stick' },
+  { k: 'dz',   name: 'Deadzone', min: 0, max: 30, step: 1, unit: '%', send: () => `D,${cfg.dz},${cfg.expo},${cfg.ramp}` },
+  { k: 'expo', name: 'Expo', min: 0, max: 100, step: 1, unit: '%', send: () => `D,${cfg.dz},${cfg.expo},${cfg.ramp}` },
+  { sec: 'Auto mission' },
+  { k: 'legMs',   name: 'Leg time', min: 500, max: 30000, step: 500, scale: 1000, fix: 1, unit: 's', send: () => `E,${cfg.legMs},${cfg.holdMs},${cfg.autoThr}` },
+  { k: 'holdMs',  name: 'Hold time', min: 0, max: 60000, step: 1000, scale: 1000, fix: 0, unit: 's', send: () => `E,${cfg.legMs},${cfg.holdMs},${cfg.autoThr}` },
+  { k: 'autoThr', name: 'Auto throttle', min: 0, max: 255, step: 1, send: () => `E,${cfg.legMs},${cfg.holdMs},${cfg.autoThr}` },
+  { sec: 'Directions' },
+  { tog: 'invL', name: 'Reverse left motor' },
+  { tog: 'invR', name: 'Reverse right motor' },
+  { tog: 'swap', name: 'Swap left / right' },
+  { tog: 'invG', name: 'Flip gyro (heading goes the wrong way)' },
+];
+const dirSend = () => `I,${cfg.invL},${cfg.invR},${cfg.swap},${cfg.invG}`;
+const ui = {};
+
+function fmt(s, v) {
+  const x = s.scale ? v / s.scale : v;
+  return (s.fix != null ? x.toFixed(s.fix) : x) + (s.unit || '');
+}
+
+function buildSettings() {
+  const grid = $('setGrid');
+  const timers = {};
+  for (const s of sliders) {
+    if (s.sec) { const d = document.createElement('div'); d.className = 'sec'; d.textContent = s.sec; grid.appendChild(d); continue; }
+    if (s.hint) { const d = document.createElement('div'); d.className = 'hint'; d.textContent = s.hint; grid.appendChild(d); continue; }
+    if (s.tog) {
+      const d = document.createElement('div'); d.className = 'tog';
+      d.innerHTML = `<span>${s.name}</span><div class="switch"></div>`;
+      const sw = d.querySelector('.switch');
+      sw.addEventListener('click', () => { cfg[s.tog] = cfg[s.tog] ? 0 : 1; sw.classList.toggle('on', !!cfg[s.tog]); sendCmd(dirSend()); });
+      ui[s.tog] = { set: v => sw.classList.toggle('on', !!v) };
+      grid.appendChild(d); continue;
+    }
+    const d = document.createElement('div'); d.className = 'set';
+    d.innerHTML = `<span>${s.name}</span><input type="range" min="${s.min}" max="${s.max}" step="${s.step}"><span class="val"></span>`;
+    const r = d.querySelector('input'), v = d.querySelector('.val');
+    const show = () => { v.textContent = fmt(s, cfg[s.k]); };
+    r.addEventListener('input', () => {
+      cfg[s.k] = parseFloat(r.value); show();
+      if (s.k === 'max') syncLimitMain();
+      clearTimeout(timers[s.k]); timers[s.k] = setTimeout(() => sendCmd(s.send()), 120);
+    });
+    ui[s.k] = { set: val => { r.value = val; show(); } };
+    ui[s.k].set(cfg[s.k]);
+    grid.appendChild(d);
+  }
+}
+
+function syncLimitMain() { $('limitMain').value = cfg.max; $('limitMainVal').textContent = cfg.max; }
+let limitTimer;
+$('limitMain').addEventListener('input', e => {
+  cfg.max = parseInt(e.target.value); $('limitMainVal').textContent = cfg.max;
+  ui.max && ui.max.set(cfg.max);
+  clearTimeout(limitTimer); limitTimer = setTimeout(() => sendCmd(`V,${cfg.max}`), 120);
+});
+
+function applyCfg(p) {
+  const keys = ['kp','kd','trim','minL','minR','max','dz','expo','ramp','invL','invR','swap','invG','legMs','holdMs','autoThr'];
+  keys.forEach((k, i) => { if (p[i] !== undefined) cfg[k] = parseFloat(p[i]); });
+  for (const k of keys) ui[k] && ui[k].set(cfg[k]);
+  syncLimitMain();
+}
+
+// ---------------- throttle (stays where you leave it) ----------------
+const thrEl = $('thr');
+function drawThr() {
+  const h = thrEl.clientHeight, y = h / 2 - (thr / 255) * (h / 2);
+  $('thrKnob').style.top = y + 'px';
+  $('thrKnob').textContent = Math.abs(thr);
+  const f = $('thrFill');
+  f.style.top = Math.min(y, h / 2) + 'px'; f.style.height = Math.abs(y - h / 2) + 'px';
+  f.classList.toggle('rev', thr < 0);
+  $('thrVal').textContent = (thr < 0 ? 'R ' : '') + Math.abs(thr);
+  $('thrVal').style.color = thr < 0 ? 'var(--warn)' : 'var(--text)';
+}
+function setThrFromY(clientY) {
+  const r = thrEl.getBoundingClientRect();
+  let v = Math.round(((r.top + r.height / 2) - clientY) / (r.height / 2) * 255);
+  v = Math.max(-255, Math.min(255, v));
+  if (Math.abs(v) < 14) v = 0;               // centre notch
+  thr = v; drawThr();
+}
+thrEl.addEventListener('pointerdown', e => { thrEl.setPointerCapture(e.pointerId); setThrFromY(e.clientY); });
+thrEl.addEventListener('pointermove', e => { if (thrEl.hasPointerCapture(e.pointerId)) setThrFromY(e.clientY); });
+$('thrZero').addEventListener('click', () => { thr = 0; drawThr(); });
+
+// ---------------- steering (springs back) ----------------
+const stEl = $('steer');
+function drawSteer() {
+  const w = stEl.clientWidth, x = w / 2 + (steer / 255) * (w / 2 - 31);
+  $('steerKnob').style.left = x + 'px';
+  const f = $('steerFill');
+  f.style.left = Math.min(x, w / 2) + 'px'; f.style.width = Math.abs(x - w / 2) + 'px';
+  $('steerVal').textContent = steer === 0 ? '0' : (steer < 0 ? '◀ ' : '') + Math.abs(steer) + (steer > 0 ? ' ▶' : '');
+}
+function setSteerFromX(clientX) {
+  const r = stEl.getBoundingClientRect();
+  let v = Math.round((clientX - (r.left + r.width / 2)) / (r.width / 2 - 31) * 255);
+  steer = Math.max(-255, Math.min(255, v)); drawSteer();
+}
+stEl.addEventListener('pointerdown', e => { stEl.setPointerCapture(e.pointerId); setSteerFromX(e.clientX); });
+stEl.addEventListener('pointermove', e => { if (stEl.hasPointerCapture(e.pointerId)) setSteerFromX(e.clientX); });
+const steerRelease = () => { steer = 0; drawSteer(); };
+stEl.addEventListener('pointerup', steerRelease);
+stEl.addEventListener('pointercancel', steerRelease);
+stEl.addEventListener('lostpointercapture', steerRelease);
+
+// ---------------- compass ----------------
+(function ticks() {
+  let s = '';
+  for (let a = 0; a < 360; a += 15) {
+    const r1 = a % 90 === 0 ? 46 : 51, rad = a * Math.PI / 180;
+    s += `<line x1="${Math.sin(rad) * r1}" y1="${-Math.cos(rad) * r1}" x2="${Math.sin(rad) * 55}" y2="${-Math.cos(rad) * 55}" stroke="#3b5878" stroke-width="${a % 90 === 0 ? 2 : 1}"/>`;
+  }
+  $('ticks').innerHTML = s;
+})();
+
+// ---------------- telemetry ----------------
+const stateNames = ['Idle', 'Leg', 'Holding', 'Done'];
+function onTelemetry(p) {
+  const h = p[0] / 10, t = p[1] / 10, L = +p[2], R = +p[3], m = +p[4], st = +p[5], ms = +p[6], fl = +p[7];
+  $('boatNeedle').setAttribute('transform', `rotate(${h})`);
+  $('tgtNeedle').setAttribute('transform', `rotate(${t})`);
+  $('hdg').textContent = h.toFixed(1) + '°';
+  $('tgt').textContent = t.toFixed(1) + '°';
+  let e = t - h; while (e > 180) e -= 360; while (e < -180) e += 360;
+  $('err').textContent = e.toFixed(1) + '°';
+  $('stn').textContent = st ? `${st} / 5` : '-';
+  bar('barL', L); bar('barR', R);
+  $('pwmL').textContent = L; $('pwmR').textContent = R;
+  if (m !== mode) setModeUI(m);
+  imuOk = !!(fl & 1);
+  $('imuBadge').classList.toggle('show', !imuOk);
+  $('wdBadge').classList.toggle('show', !!(fl & 4));
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('off', !imuOk && b.dataset.m !== '0'));
+  $('mst').textContent = m === 2 ? (ms === 1 ? `Leg to ${st}` : ms === 2 ? `Holding ${st}` : stateNames[ms]) : '-';
+  if (recording) recRows.push([((Date.now() - recStart) / 1000).toFixed(2), h, t, L, R, m, st, ms, fl & 1, thr, steer].join(','));
+}
+function bar(id, v) {
+  const el = $(id), w = Math.abs(v) / 255 * 50;
+  el.style.left = (v >= 0 ? 50 : 50 - w) + '%'; el.style.width = w + '%';
+}
+
+function setModeUI(m) {
+  mode = m;
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('sel', +b.dataset.m === m));
+  $('missionRow').style.display = m === 2 ? 'flex' : 'none';
+  $('limitRow').style.display = m === 2 ? 'none' : 'flex';
+}
+document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', () => {
+  const m = +b.dataset.m; setModeUI(m); sendCmd(`M,${m}`);
+}));
+document.querySelectorAll('#missionRow button').forEach(b => b.addEventListener('click', () => sendCmd(`Q,${b.dataset.q}`)));
+
+// ---------------- BLE ----------------
+function setConn(state, text) {
+  $('dot').className = 'dot' + (state === 'on' ? ' on' : state === 'wait' ? ' wait' : '');
+  $('connText').textContent = text;
+  $('connBtn').textContent = state === 'off' ? 'Connect' : 'Disconnect';
+}
+
+async function connect() {
+  if (!navigator.bluetooth) { $('nobt').classList.add('show'); return; }
+  try {
+    device = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'WR-' }], optionalServices: [NUS] });
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    userDisconnect = false;
+    await openGatt();
+  } catch (e) { toast(e.message || String(e)); setConn('off', 'Not connected'); }
+}
+
+async function openGatt() {
+  setConn('wait', 'Connecting…');
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(NUS);
+  rxChar = await svc.getCharacteristic(RX);
+  const txChar = await svc.getCharacteristic(TX);
+  await txChar.startNotifications();
+  txChar.addEventListener('characteristicvaluechanged', e => onLine(dec.decode(e.target.value)));
+  connected = true; queue = []; pendingJ = null; writing = false;
+  thr = 0; steer = 0; drawThr(); drawSteer();
+  setConn('on', device.name || 'Boat');
+  $('banner').classList.remove('show');
+  sendCmd('GET');
+  requestWake();
+  logLine('Connected to ' + (device.name || 'boat'));
+}
+
+function onDisconnected() {
+  connected = false; rxChar = null;
+  thr = 0; steer = 0; drawThr(); drawSteer();
+  if (userDisconnect) { setConn('off', 'Not connected'); return; }
+  setConn('wait', 'Reconnecting…');
+  $('banner').classList.add('show');
+  logLine('Connection lost');
+  reconnect();
+}
+
+async function reconnect() {
+  for (let i = 0; !connected && !userDisconnect && device; i++) {
+    try { await openGatt(); return; } catch (e) { await new Promise(r => setTimeout(r, 1500)); }
+  }
+}
+
+$('connBtn').addEventListener('click', async () => {
+  if ($('connBtn').textContent === 'Disconnect') {
+    userDisconnect = true;
+    $('banner').classList.remove('show');
+    if (connected) { try { await writeNow('S'); } catch (e) {} device.gatt.disconnect(); }
+    setConn('off', 'Not connected');
+  } else connect();
+});
+
+async function writeNow(s) {
+  if (!rxChar) return;
+  const data = enc.encode(s);
+  if (s.startsWith('J,') && rxChar.writeValueWithoutResponse) return rxChar.writeValueWithoutResponse(data);
+  if (rxChar.writeValueWithResponse) return rxChar.writeValueWithResponse(data);
+  return rxChar.writeValue(data);
+}
+function sendCmd(s) { if (!connected) return; queue.push(s); pump(); }
+async function pump() {
+  if (writing || !rxChar) return;
+  let msg = queue.shift();
+  if (!msg) { if (!pendingJ) return; msg = pendingJ; pendingJ = null; }
+  writing = true;
+  try { await writeNow(msg); } catch (e) { /* drop, next tick resends */ }
+  writing = false;
+  if (queue.length || pendingJ) pump();
+}
+setInterval(() => { if (connected) { pendingJ = `J,${thr},${steer}`; pump(); } }, 50);
+
+function onLine(text) {
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim(); if (!line) continue;
+    if (line.startsWith('H,')) { onTelemetry(line.slice(2).split(',').map(Number)); continue; }
+    if (line.startsWith('CFG,')) { applyCfg(line.slice(4).split(',')); logLine('Settings loaded from boat'); continue; }
+    logLine(line); toast(line);
+  }
+}
+
+// ---------------- STOP + safety ----------------
+$('stopBtn').addEventListener('click', () => {
+  thr = 0; steer = 0; drawThr(); drawSteer();
+  queue.unshift('S'); pump();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { thr = 0; steer = 0; drawThr(); drawSteer(); if (connected) writeNow('S').catch(() => {}); }
+  else requestWake();
+});
+async function requestWake() {
+  try { if ('wakeLock' in navigator && !document.hidden) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+
+// ---------------- sheets, log, CSV ----------------
+$('setBtn').addEventListener('click', () => $('setSheet').classList.add('show'));
+$('logBtn').addEventListener('click', () => $('logSheet').classList.add('show'));
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => b.closest('.sheet').classList.remove('show')));
+$('calBtn').addEventListener('click', () => sendCmd('CAL'));
+$('getBtn').addEventListener('click', () => sendCmd('GET'));
+$('saveBtn').addEventListener('click', () => sendCmd('SAVE'));
+
+function logLine(s) {
+  const t = new Date().toLocaleTimeString();
+  const el = $('log'); el.textContent = `${t}  ${s}\n` + el.textContent.slice(0, 20000);
+}
+$('clearBtn').addEventListener('click', () => { $('log').textContent = ''; });
+$('recBtn').addEventListener('click', () => {
+  recording = !recording;
+  if (recording) { recRows = []; recStart = Date.now(); logLine('Recording started'); }
+  else logLine(`Recording stopped, ${recRows.length} rows`);
+  $('recBtn').classList.toggle('on', recording); $('recBtn').textContent = recording ? 'Stop rec' : 'Record';
+  $('recBadge').classList.toggle('show', recording);
+});
+$('csvBtn').addEventListener('click', async () => {
+  if (!recRows.length) { toast('Nothing recorded yet'); return; }
+  const csv = 'time_s,heading_deg,target_deg,pwm_left,pwm_right,mode,station,mission_state,imu_ok,throttle_cmd,steer_cmd\n' + recRows.join('\n');
+  const name = `waverider_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+  const file = new File([csv], name, { type: 'text/csv' });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+  } catch (e) { if (e.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; a.click();
+});
+
+let toastTimer;
+function toast(s) { const t = $('toast'); t.textContent = s; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200); }
+
+// ---------------- start ----------------
+buildSettings(); syncLimitMain(); drawThr(); drawSteer(); setModeUI(0);
+window.addEventListener('resize', () => { drawThr(); drawSteer(); });
+if (!navigator.bluetooth) $('nobt').classList.add('show');
+</script>
+</body>
+</html>
