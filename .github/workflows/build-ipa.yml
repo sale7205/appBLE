@@ -22,9 +22,17 @@ jobs:
       - name: Build (unsigned, Sideloadly signs it)
         working-directory: ios
         run: |
+          set -o pipefail
           xcodebuild -project WaveRider.xcodeproj -scheme WaveRider -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log
+
+      - name: Show build errors
+        if: failure()
+        working-directory: ios
+        run: |
+          msg=$(grep -E "error:|fatal error|BUILD FAILED" build.log | sort -u | head -15 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          echo "::error title=xcodebuild errors::${msg}"
 
       - name: Package .ipa
         working-directory: ios
